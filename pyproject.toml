@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "selenium-utils"
+version = "0.1.0"
+description = "Utility to be used in selenium scrapers"
+requires-python = ">=3.11"
+dependencies = [
+    "selenium",
+    "undetected-chromedriver",
+    "setuptools",
+    "xvfbwrapper"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["selenium_utils"]
