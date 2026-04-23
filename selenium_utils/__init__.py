@@ -5,7 +5,6 @@ from .utils import (
     DEFAULT_DRIVER_PATH,
     SNAP_BIN_PATH,
     SNAP_DRIVER_PATH,
-    get_chrome_major_version,
     remove_tags,
     wait_for,
 )
@@ -17,7 +16,6 @@ __all__ = [
     "DEFAULT_DRIVER_PATH",
     "SNAP_BIN_PATH",
     "SNAP_DRIVER_PATH",
-    "get_chrome_major_version",
     "remove_tags",
     "wait_for",
 ]

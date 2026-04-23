@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import ElementClickInterceptedException, NoSuchElementException
 from selenium.webdriver.common.by import By
 
 from .utils import remove_tags, wait_for
@@ -89,7 +89,12 @@ class SeleniumElement:
         return self.webelement.get_attribute(attribute_name)
 
     def click(self):
-        self.webelement.click()
+        try:
+            self.webelement.click()
+        except ElementClickInterceptedException:
+            self.driver.logfunc(f"Click intercepted on element {self}. Waiting 1s before trying again...")
+            self.driver.sleep(1)
+            self.webelement.click()
 
     def send_keys(self, keys: str):
         self.webelement.send_keys(keys)

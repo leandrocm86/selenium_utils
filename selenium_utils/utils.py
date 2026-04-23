@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 # Instalados com snap install chromium no ubuntu (chromium é só via snap agora)
 DEFAULT_DRIVER_PATH = "/usr/bin/chromedriver"
 SNAP_DRIVER_PATH = "/snap/bin/chromium.chromedriver"
-DEFAULT_BIN_PATH = "/usr/bin/chromium-browser"
+DEFAULT_BIN_PATH = "/usr/bin/chromium"
 SNAP_BIN_PATH = "/snap/bin/chromium"
 
 T = TypeVar("T")
@@ -29,11 +29,6 @@ def remove_tags(text: str):
             break
         text = text[:index_tag_start] + text[index_tag_end + 1 :]
     return text
-
-
-def get_chrome_major_version():
-    out = subprocess.run(['google-chrome', '--version'], capture_output=True, text=True)
-    return int(out.stdout.strip().split()[-1].partition('.')[0])
 
 
 def wait_for(

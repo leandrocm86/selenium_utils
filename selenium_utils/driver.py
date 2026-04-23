@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import base64
+import subprocess
+import re
+import time
 from pathlib import Path
 from typing import Callable, TYPE_CHECKING
 
@@ -11,7 +14,7 @@ from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.print_page_options import PrintOptions
 
-from .utils import get_chrome_major_version, wait_for
+from .utils import wait_for, DEFAULT_BIN_PATH
 
 if TYPE_CHECKING:
     from .element import SeleniumElement
@@ -32,7 +35,7 @@ class SeleniumDriver:
         if not options:
             options = self.build_default_options()
 
-        chrome_version = get_chrome_major_version()
+        chrome_version = self._get_chrome_major_version(options.binary_location)
         logfunc(f'{chrome_version=}')
 
         if driver_path:
@@ -55,9 +58,16 @@ class SeleniumDriver:
         self.logfunc("Selenium driver loaded")
 
 
+    def _get_chrome_major_version(self, binary_location: str) -> int:
+        out = subprocess.run([binary_location, "--version"], capture_output=True, text=True, check=True)
+        assert (version_search := re.search(r"(\d+)\.\d+\.\d+", out.stdout))
+        return int(version_search.group(1))
+
+
     @staticmethod
     def build_default_options() -> uc.ChromeOptions:
         options = uc.ChromeOptions()
+        options.binary_location = DEFAULT_BIN_PATH
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--ignore-certificate-errors")
@@ -163,3 +173,7 @@ class SeleniumDriver:
             with open(path, "w") as f:
                 f.write(self.driver.page_source)
         return self.driver.page_source
+
+    def sleep(self, seconds: int) -> None:
+        self.logfunc(f"Sleeping for {seconds} seconds")
+        time.sleep(seconds)
