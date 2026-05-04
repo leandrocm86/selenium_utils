@@ -11,7 +11,8 @@ dependencies = [
     "selenium",
     "undetected-chromedriver",
     "setuptools",
-    "xvfbwrapper"
+    "xvfbwrapper",
+    "beautifulsoup4"
 ]
 
 [tool.hatch.build.targets.wheel]

@@ -4,6 +4,7 @@ import base64
 import subprocess
 import re
 import time
+from bs4 import BeautifulSoup
 from pathlib import Path
 from typing import Callable, TYPE_CHECKING
 
@@ -23,7 +24,6 @@ if TYPE_CHECKING:
 class SeleniumDriver:
     def __init__(
         self,
-        driver_path: str | None = None,
         logfunc: Callable[[str], None] = print,
         options: uc.ChromeOptions | None = None,
         download_path: str | None = None
@@ -38,16 +38,13 @@ class SeleniumDriver:
         chrome_version = self._get_chrome_major_version(options.binary_location)
         logfunc(f'{chrome_version=}')
 
-        if driver_path:
-            self.driver = uc.Chrome(options=options, version_main=chrome_version, driver_executable_path=driver_path)
-        else:
-            self.driver = uc.Chrome(options=options, version_main=chrome_version)
+        self.raw_driver = uc.Chrome(options=options, version_main=chrome_version, user_data_dir="/tmp/custom_profile")
 
         self.logfunc = logfunc
         self.logfunc("Starting Selenium driver")
 
         if download_path:
-            self.driver.execute_cdp_cmd(
+            self.raw_driver.execute_cdp_cmd(
                 "Page.setDownloadBehavior",
                 {
                     "behavior": "allow",
@@ -73,6 +70,13 @@ class SeleniumDriver:
         options.add_argument("--ignore-certificate-errors")
         options.add_argument("--disable-crash-reporter")
         options.add_argument("--kiosk-printing")
+        options.add_argument("--disable-features=OptimizationGuideModelDownloading,OptimizationHints,AutofillServerCommunication,Translate,OptimizationGuide,BackForwardCache,BackForwardCacheMemoryControls")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--disable-software-rasterizer")
+
+        # === LOGGING PARA VER MOTIVOS DE CRASHES ===
+        options.add_argument("--enable-logging")
+        options.add_argument("--v=1")                            # nível de verbosidade
         return options
 
 
@@ -80,18 +84,18 @@ class SeleniumDriver:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.driver:
+        if self.raw_driver:
             self.quit()
         self.xvfb.stop()
 
     def quit(self):
         self.logfunc("Closing browser driver")
-        self.driver.quit()
+        self.raw_driver.quit()
 
     def get(self, url: str, timeout=300):
-        self.driver.set_page_load_timeout(timeout)
+        self.raw_driver.set_page_load_timeout(timeout)
         self.logfunc("Retrieving " + url)
-        self.driver.get(url)
+        self.raw_driver.get(url)
 
     def by_css(self, css_selector: str, timeout: int = 10) -> SeleniumElement:
         found = self.find_by_css(css_selector, timeout=timeout)
@@ -164,15 +168,42 @@ class SeleniumDriver:
         print_options = PrintOptions()
         print_options.page_width = width
         print_options.page_height = height
-        pdf_data = self.driver.print_page(print_options=print_options)
+        pdf_data = self.raw_driver.print_page(print_options=print_options)
         with open(path, "wb") as f:
             f.write(base64.b64decode(pdf_data))
 
-    def print_page_source(self, path: str | None = None) -> str:
-        if path:
-            with open(path, "w") as f:
-                f.write(self.driver.page_source)
-        return self.driver.page_source
+    def screenshot(self, path: str | Path, full_page: bool = True) -> None:
+        """Salva um screenshot da página renderizada.
+        Args:
+            path: Caminho para salvar o arquivo PNG.
+            full_page: Se True, captura a página inteira (além do viewport).
+        """
+        self.logfunc(f"Taking screenshot: {path}")
+        path = str(path)
+
+        result = self.raw_driver.execute_cdp_cmd("Page.captureScreenshot", {
+            "format": "png",
+            "captureBeyondViewport": full_page,
+        })
+        with open(str(path), "wb") as f:
+            f.write(base64.b64decode(result["data"]))
+
+    def extract_page_source(self, live: bool = True, pretty: bool = True) -> str:
+        try:
+            source = self.raw_driver.execute_script("return document.documentElement.outerHTML") if live else self.raw_driver.page_source
+            if pretty:
+                source = BeautifulSoup(source, "html.parser").prettify()
+            return source
+        except Exception as e:
+            self.logfunc(f"Failed to extract page source: {e}")
+            return ""
+
+    def save_mhtml(self, path: str | Path) -> None:
+        """Salva a página completa como MHTML (HTML + todos os recursos em um arquivo)."""
+        self.logfunc(f"Saving MHTML snapshot: {path}")
+        result = self.raw_driver.execute_cdp_cmd("Page.captureSnapshot", {"format": "mhtml"})
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(result["data"])
 
     def sleep(self, seconds: int) -> None:
         self.logfunc(f"Sleeping for {seconds} seconds")

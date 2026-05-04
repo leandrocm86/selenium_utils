@@ -88,6 +88,9 @@ class SeleniumElement:
     def attr(self, attribute_name: str) -> str | None:
         return self.webelement.get_attribute(attribute_name)
 
+    def is_displayed(self) -> bool:
+        return self.webelement.is_displayed()
+
     def click(self):
         try:
             self.webelement.click()
