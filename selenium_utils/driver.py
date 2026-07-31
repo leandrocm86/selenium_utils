@@ -71,12 +71,17 @@ class SeleniumDriver:
         options.add_argument("--disable-crash-reporter")
         options.add_argument("--kiosk-printing")
         options.add_argument("--disable-features=OptimizationGuideModelDownloading,OptimizationHints,AutofillServerCommunication,Translate,OptimizationGuide,BackForwardCache,BackForwardCacheMemoryControls")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--disable-software-rasterizer")
+
+        #options.add_argument("--disable-gpu") -> desnecessario atualmente
+        #options.add_argument("--disable-software-rasterizer")
+        options.add_argument("--use-gl=swiftshader")
+        options.add_argument("--enable-unsafe-swiftshader")  # necessário em Chrome recentes p/ permitir swiftshader fora de contextos "seguros"
+        options.add_argument("--use-angle=swiftshader")
 
         # === LOGGING PARA VER MOTIVOS DE CRASHES ===
         options.add_argument("--enable-logging")
-        options.add_argument("--v=1")                            # nível de verbosidade
+        options.add_argument("--v=1")  # verbosidade
+
         return options
 
 
