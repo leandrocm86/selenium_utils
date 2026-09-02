@@ -29,9 +29,15 @@ class SeleniumElement:
             raise NoSuchElementException(f"Cannot find child with selector {xpath}")
         return found
 
+    def parent(self, timeout: int = 10) -> SeleniumElement:
+        parent = self.child_by_xpath('..', timeout=timeout)
+        if not parent:
+            raise NoSuchElementException('Not found parent for element: ' + str(self))
+        return parent
+
     def find_child_by_css(self, css_selector: str, timeout: int = 10) -> SeleniumElement | None:
         found = self.all_children_by_css(css_selector, timeout=timeout)
-        assert len(found) <= 1, f"Found {len(found)} children searching for {css_selector}"
+        assert len(found) <= 1, f"Found {len(found)} children searching for '{css_selector}' on element: {str(self)}"
         return found[0] if found else None
 
     def find_child_by_xpath(self, xpath: str, timeout: int = 10) -> SeleniumElement | None:
@@ -95,17 +101,38 @@ class SeleniumElement:
         try:
             self.webelement.click()
         except ElementClickInterceptedException:
-            self.driver.logfunc(f"Click intercepted on element {self}. Waiting 1s before trying again...")
-            self.driver.sleep(1)
+            self.driver.logfunc(f"Click intercepted on element {self}. Waiting 2s before trying again...")
+            self.driver.sleep(2)
             self.webelement.click()
 
     def send_keys(self, keys: str):
         self.webelement.send_keys(keys)
 
+    def opening_tag(self) -> str:
+        script = """
+        var el = arguments[0];
+        var s = '<' + el.tagName.toLowerCase();
+        for (var i = 0; i < el.attributes.length; i++) {
+            var a = el.attributes[i];
+            s += ' ' + a.name + '="' + a.value + '"';
+        }
+        return s + '>';
+        """
+        return self.driver.raw_driver.execute_script(script, self.webelement)
+
     def __str__(self) -> str:
         id = self.attr("id")
-        tag = self.webelement.tag_name
-        return f"{tag}#{id if id else '-'}"
+        if id:
+            tag = self.webelement.tag_name
+            return f"{tag}#{id if id else '-'}"
+        else:
+            return self.opening_tag()
 
     def __repr__(self) -> str:
         return str(self)
+
+    def __eq__(self, value) -> bool:
+        return isinstance(value, SeleniumElement) and self.webelement == value.webelement
+
+    def __hash__(self) -> int:
+        return hash(self.webelement)
