@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import base64
+import fcntl
+import shutil
+import tempfile
 import subprocess
 import re
 import time
@@ -12,10 +15,13 @@ import undetected_chromedriver as uc
 from xvfbwrapper import Xvfb
 
 from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver.common.alert import Alert
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.print_page_options import PrintOptions
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
-from .utils import wait_for, DEFAULT_BIN_PATH
+from .utils import wait_for
 
 if TYPE_CHECKING:
     from .element import SeleniumElement
@@ -26,19 +32,43 @@ class SeleniumDriver:
         self,
         logfunc: Callable[[str], None] = print,
         options: uc.ChromeOptions | None = None,
-        download_path: str | None = None
+        download_path: str | None = None,
+        error_pdf: str | Path | None = None,
+        error_screenshot: str | Path | None = None,
+        error_page_source: str | Path | None = None,
+        error_mhtml: str | Path | None = None
     ):
+
+        self.error_pdf = error_pdf
+        self.error_screenshot = error_screenshot
+        self.error_page_source = error_page_source
+        self.error_mhtml = error_mhtml
 
         self.xvfb = Xvfb(width=1920, height=1080, colordepth=24)
         self.xvfb.start()
 
         if not options:
             options = self.build_default_options()
+            logfunc(f"Default chrome binary at {options.binary_location}")
 
-        chrome_version = self._get_chrome_major_version(options.binary_location)
+        chrome_version = self._get_browser_major_version(options.binary_location)
         logfunc(f'{chrome_version=}')
 
-        self.raw_driver = uc.Chrome(options=options, version_main=chrome_version, user_data_dir="/tmp/custom_profile")
+        # Perfil exclusivo por execução: um perfil compartilhado é travado pelo Chrome
+        # e impede execuções paralelas.
+        self.profile_dir = tempfile.mkdtemp(prefix="selenium_profile_")
+        self.raw_driver = None
+        try:
+            # O undetected_chromedriver baixa/patcheia um chromedriver compartilhado;
+            # serializa apenas a inicialização para evitar corrida entre processos.
+            with open("/tmp/selenium_utils_uc_init.lock", "w") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                self.raw_driver = uc.Chrome(options=options, version_main=chrome_version,
+                                            user_data_dir=self.profile_dir)
+        except BaseException:
+            shutil.rmtree(self.profile_dir, ignore_errors=True)
+            self.xvfb.stop()
+            raise
 
         self.logfunc = logfunc
         self.logfunc("Starting Selenium driver")
@@ -54,17 +84,25 @@ class SeleniumDriver:
 
         self.logfunc("Selenium driver loaded")
 
-
-    def _get_chrome_major_version(self, binary_location: str) -> int:
+    def _get_browser_major_version(self, binary_location: str) -> int:
         out = subprocess.run([binary_location, "--version"], capture_output=True, text=True, check=True)
         assert (version_search := re.search(r"(\d+)\.\d+\.\d+", out.stdout))
         return int(version_search.group(1))
 
+    @staticmethod
+    def _get_browser_bin_path(browser: str = "chromium") -> str | None:
+        try:
+            return subprocess.run(["which", browser], capture_output=True, text=True,
+                                  check=True, timeout=3).stdout.strip()
+        except subprocess.CalledProcessError:
+            print(f'Error finding {browser} binary!')
+            return None
 
     @staticmethod
-    def build_default_options() -> uc.ChromeOptions:
+    def build_default_options(browser: str = "chromium") -> uc.ChromeOptions:
         options = uc.ChromeOptions()
-        options.binary_location = DEFAULT_BIN_PATH
+        if (bin_path := SeleniumDriver._get_browser_bin_path(browser)):
+            options.binary_location = bin_path
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--ignore-certificate-errors")
@@ -84,14 +122,58 @@ class SeleniumDriver:
 
         return options
 
+    def _viewport_size_cm(self) -> tuple[float, float]:
+        """Tamanho atual da janela (viewport) em cm, para uso no print_page."""
+        width_px, height_px = self.execute_script(
+            "return [window.innerWidth, window.innerHeight];"
+        )
+        px_to_cm = 2.54 / 96  # CSS: 96 px = 1 polegada = 2.54 cm
+        return width_px * px_to_cm, height_px * px_to_cm
+
+    def save_error_artifacts(self) -> None:
+        """Salva os artefatos de erro configurados no contrutor. Nunca levanta exceção, para não
+        mascarar o erro original."""
+
+        def prepare(path: str | Path) -> Path:
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            return p
+
+        def run(name: str, path: str | Path | None, action: Callable[[Path], None]) -> None:
+            if not path:
+                return
+            try:
+                action(prepare(path))
+                self.logfunc(f"Saved error {name}: {path}")
+            except Exception as e:
+                self.logfunc(f"Failed to save error {name} ({path}): {e!r}")
+
+        def save_pdf(p: Path) -> None:
+            width, height = self._viewport_size_cm()
+            self.print_page(p, width=width, height=height)
+
+        def save_source(p: Path) -> None:
+            p.write_text(self.extract_page_source(), encoding="utf-8")
+
+        run("pdf", self.error_pdf, save_pdf)
+        run("screenshot", self.error_screenshot, self.screenshot)
+        run("page source", self.error_page_source, save_source)
+        run("mhtml", self.error_mhtml, self.save_mhtml)
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.raw_driver:
-            self.quit()
-        self.xvfb.stop()
+        try:
+            if exc_type is not None and self.raw_driver:
+                self.logfunc(f"Exception inside context manager: {exc_type.__name__}: {exc_val}")
+                self.save_error_artifacts()
+            if self.raw_driver:
+                self.quit()
+        finally:
+            self.xvfb.stop()
+            shutil.rmtree(self.profile_dir, ignore_errors=True)
+        return False  # propaga a exceção original
 
     def quit(self):
         self.logfunc("Closing browser driver")
@@ -166,6 +248,9 @@ class SeleniumDriver:
         css_selector = tag_name
         return self.all_by_css(css_selector, timeout=timeout)
 
+    def get_alert(self, timeout: int = 10) -> Alert:
+        return WebDriverWait(self.raw_driver, timeout).until(EC.alert_is_present())
+
     def print_page(self, path: Path | str, width: float, height: float):
         """Saves a page as PDF in the given path.
         A3 = 29.7 x 42; A4 = 21 x 29.7
@@ -213,3 +298,11 @@ class SeleniumDriver:
     def sleep(self, seconds: int) -> None:
         self.logfunc(f"Sleeping for {seconds} seconds")
         time.sleep(seconds)
+
+    def execute_script(self, script: str, *args) -> Any:
+        """Executa um script JavaScript na página atual."""
+        return self.raw_driver.execute_script(script, *args)
+
+    def execute_cdp_cmd(self, command: str, params: dict) -> Any:
+        """Executa um comando CDP (Chrome DevTools Protocol) na página atual."""
+        return self.raw_driver.execute_cdp_cmd(command, params)

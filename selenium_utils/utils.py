@@ -59,7 +59,7 @@ def wait_for(
         return []
 
 
-def extract_diagnostics():
+def extract_diagnostics(profile_dir: str = "/tmp/custom_profile"):
     diagnostics = {}
 
     # 1. Memória do CONTAINER
@@ -121,7 +121,7 @@ def extract_diagnostics():
 
     # 5. Últimas linhas do log do Chrome (se habilitado)
     try:
-        with open("/tmp/custom_profile/chrome_debug.log", "r", encoding="utf-8", errors="ignore") as f:
+        with open(os.path.join(profile_dir, "chrome_debug.log"), "r", encoding="utf-8", errors="ignore") as f:
             diagnostics["chrome_log"] = "".join(f.readlines()[-30:])
     except:
         diagnostics["chrome_log"] = "Log do Chrome não encontrado"
